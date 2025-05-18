@@ -51,10 +51,11 @@ dotnet run -- --dll=<path-to-dll> [--output=<output-directory>] [--ignored-filen
 To generate code based on the most important files containing NinjaTrader's public API, you can use the following commands:
 
 ```bash
-dotnet run -- --dll=<path-to-dll> [--output=<output-directory>]
-dotnet run -- --dll="C:\Users\<yourusername>\Documents\NinjaTrader 8\bin\Custom\NinjaTrader.Vendor.dll" --output="<output-directory-root>\Vendor"
-dotnet run -- --dll="C:\Users\<yourusername>\Documents\NinjaTrader 8\bin\Custom\NinjaTrader.Custom.dll" --output="<output-directory-root>\Custom"
-dotnet run -- --dll="%ProgramFiles%\NinjaTrader 8\bin\NinjaTrader.Client.dll" --output="<output-directory-root>\Client"
+dotnet run -- --dll path-to-dll> [--output <output-directory>]
+dotnet run -- --dll "C:\Users\<yourusername>\Documents\NinjaTrader 8\bin\Custom\NinjaTrader.Vendor.dll" --output "<output-directory-root>\Vendor"
+dotnet run -- --dll "C:\Users\<yourusername>\Documents\NinjaTrader 8\bin\Custom\NinjaTrader.Custom.dll" --output "<output-directory-root>\Custom"
+dotnet run -- --dll "%ProgramFiles%\NinjaTrader 8\bin\NinjaTrader.Core.dll" --output "<output-directory-root>\Core"
+dotnet run -- --dll "%ProgramFiles%\NinjaTrader 8\bin\NinjaTrader.Client.dll" --output "<output-directory-root>\Client"
 ```
 
 ## Output
@@ -100,3 +101,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - The author is **not affiliated with NinjaTrader** or its parent companies.
 - **Use of the NinjaTrader 8 platform requires a valid license** and is subject to its licensing agreement.  
   You must comply with all terms and only use these materials if you are properly licensed.
+
+---
+
+**_This project is provided for research and development purposes only._**
