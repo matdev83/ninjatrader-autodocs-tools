@@ -43,13 +43,11 @@ namespace ReflectionGenerator
                     return;
                 }
 
-                Console.WriteLine($"Processing DLL: {dllPath}");
                 var assembly = AssemblyDefinition.ReadAssembly(dllPath);
                 if (!Directory.Exists(outputDir))
                 {
                     Directory.CreateDirectory(outputDir);
                 }
-                Console.WriteLine($"Generating code in: {outputDir}");
 
                 int processedTypes = 0;
                 foreach (var type in assembly.MainModule.Types)
@@ -93,21 +91,18 @@ namespace ReflectionGenerator
             if ((type.IsClass || type.IsValueType) && !type.IsInterface && !type.IsEnum)
             {
                 sb.AppendLine("[Serializable]");
-                Console.WriteLine($"Adding [Serializable] to {type.Name}");
             }
 
             // Add [DataContract] for classes
             if (type.IsClass && !type.IsInterface && !type.IsEnum)
             {
                 sb.AppendLine("[DataContract]");
-                Console.WriteLine($"Adding [DataContract] to {type.Name}");
             }
 
             // Add [Flags] for enums with FlagsAttribute
             if (type.IsEnum && type.CustomAttributes.Any(a => a.AttributeType.FullName == "System.FlagsAttribute"))
             {
                 sb.AppendLine("[Flags]");
-                Console.WriteLine($"Adding [Flags] to {type.Name}");
             }
 
             // Add [Obsolete] if present
@@ -116,7 +111,6 @@ namespace ReflectionGenerator
             {
                 var msg = obsoleteAttr.ConstructorArguments.Count > 0 ? obsoleteAttr.ConstructorArguments[0].Value?.ToString() : null;
                 sb.AppendLine(msg != null ? $"[Obsolete(\"{msg}\")]" : "[Obsolete]");
-                Console.WriteLine($"Adding [Obsolete] to {type.Name}");
             }
 
             // Add namespace
@@ -203,12 +197,6 @@ namespace ReflectionGenerator
             var filePath = Path.Combine(outputDir, fileName);
             var content = sb.ToString();
             File.WriteAllText(filePath, content);
-            
-            // Debug output
-            Console.WriteLine($"Generated file {fileName} with content:");
-            Console.WriteLine("---");
-            Console.WriteLine(content);
-            Console.WriteLine("---");
         }
 
         private static string GetTypeName(TypeReference type)

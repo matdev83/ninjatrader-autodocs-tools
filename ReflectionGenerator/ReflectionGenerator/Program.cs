@@ -4,36 +4,63 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Runtime.Serialization;
+using System.Collections.Generic;
 
 namespace ReflectionGenerator
 {
     class Program
     {
+        private static HashSet<string>? _ignoredStopwords;
+
         static void Main(string[] args)
         {
             try
             {
-                string dllPath = null;
+                string? dllPath = null;
                 string outputDir = Path.Combine(Directory.GetCurrentDirectory(), "generated-code");
+                string? ignoredFilenamesPath = null;
+
+                // Debug output
+                Console.WriteLine("Received arguments:");
+                for (int i = 0; i < args.Length; i++)
+                {
+                    Console.WriteLine($"args[{i}] = '{args[i]}'");
+                }
 
                 // Parse command line arguments
-                foreach (var arg in args)
+                for (int i = 0; i < args.Length; i++)
                 {
-                    if (arg.StartsWith("--dll="))
+                    var arg = args[i];
+                    // Skip '--' argument if present
+                    if (arg == "--")
                     {
-                        dllPath = arg.Substring(6);
+                        Console.WriteLine("Skipping '--' argument");
+                        continue;
                     }
-                    else if (arg.StartsWith("--output="))
+                        
+                    if (arg == "--dll" && i + 1 < args.Length)
                     {
-                        outputDir = arg.Substring(9);
+                        dllPath = args[++i];
+                        Console.WriteLine($"Found --dll parameter: {dllPath}");
+                    }
+                    else if (arg == "--output" && i + 1 < args.Length)
+                    {
+                        outputDir = args[++i];
+                        Console.WriteLine($"Found --output parameter: {outputDir}");
+                    }
+                    else if (arg == "--ignored-filenames" && i + 1 < args.Length)
+                    {
+                        ignoredFilenamesPath = args[++i];
+                        Console.WriteLine($"Found --ignored-filenames parameter: {ignoredFilenamesPath}");
                     }
                 }
 
                 if (string.IsNullOrEmpty(dllPath))
                 {
-                    Console.WriteLine("Usage: ReflectionGenerator --dll=<path-to-dll> [--output=<output-directory>]");
-                    Console.WriteLine("  --dll=<path>     Path to the DLL file to process (required)");
-                    Console.WriteLine("  --output=<path>  Output directory for generated code (default: .\\generated-code)");
+                    Console.WriteLine("Usage: ReflectionGenerator --dll <path-to-dll> [--output <output-directory>] [--ignored-filenames <path-to-stopwords-file>]");
+                    Console.WriteLine("  --dll <path>     Path to the DLL file to process (required)");
+                    Console.WriteLine("  --output <path>  Output directory for generated code (default: .\\generated-code)");
+                    Console.WriteLine("  --ignored-filenames <path>  Path to file containing stopwords to ignore in filenames (optional)");
                     return;
                 }
 
@@ -41,6 +68,21 @@ namespace ReflectionGenerator
                 {
                     Console.WriteLine($"Error: File {dllPath} does not exist.");
                     return;
+                }
+
+                // Load ignored stopwords if file is provided
+                if (!string.IsNullOrEmpty(ignoredFilenamesPath))
+                {
+                    if (!File.Exists(ignoredFilenamesPath))
+                    {
+                        Console.WriteLine($"Error: Ignored filenames file {ignoredFilenamesPath} does not exist.");
+                        return;
+                    }
+                    _ignoredStopwords = new HashSet<string>(File.ReadAllLines(ignoredFilenamesPath)
+                        .Where(line => !string.IsNullOrWhiteSpace(line))
+                        .Select(line => line.Trim()),
+                        StringComparer.OrdinalIgnoreCase);
+                    Console.WriteLine($"Loaded {_ignoredStopwords.Count} stopwords from {ignoredFilenamesPath}");
                 }
 
                 Console.WriteLine($"Processing DLL: {dllPath}");
@@ -52,12 +94,23 @@ namespace ReflectionGenerator
                 Console.WriteLine($"Generating code in: {outputDir}");
 
                 int processedTypes = 0;
+                int skippedTypes = 0;
                 foreach (var type in assembly.MainModule.Types)
                 {
                     try
                     {
                         if (ShouldProcessType(type))
                         {
+                            var fileName = !string.IsNullOrEmpty(type.Namespace) ? $"{type.Namespace}.{type.Name}.cs" : $"{type.Name}.cs";
+                            
+                            // Check if filename contains any stopwords
+                            if (_ignoredStopwords != null && _ignoredStopwords.Any(stopword => fileName.Contains(stopword, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                Console.WriteLine($"Skipping {fileName} - contains ignored stopword");
+                                skippedTypes++;
+                                continue;
+                            }
+
                             GenerateTypeScaffolding(type, outputDir);
                             processedTypes++;
                         }
@@ -68,7 +121,7 @@ namespace ReflectionGenerator
                     }
                 }
 
-                Console.WriteLine($"Code generation completed successfully! Processed {processedTypes} types.");
+                Console.WriteLine($"Code generation completed successfully! Processed {processedTypes} types, skipped {skippedTypes} types.");
             }
             catch (Exception ex)
             {
@@ -199,7 +252,7 @@ namespace ReflectionGenerator
             }
 
             // Write to file
-            var fileName = $"{type.Name}.cs";
+            var fileName = !string.IsNullOrEmpty(type.Namespace) ? $"{type.Namespace}.{type.Name}.cs" : $"{type.Name}.cs";
             var filePath = Path.Combine(outputDir, fileName);
             var content = sb.ToString();
             File.WriteAllText(filePath, content);

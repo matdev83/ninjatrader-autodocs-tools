@@ -1,5 +1,7 @@
 generated-code/
 .cmds.txt
 .cursorignore
+.generatorignore
 ReflectionGenerator/bin/
 ReflectionGenerator/obj/
+run.bat
