@@ -20,12 +20,7 @@ namespace ReflectionGenerator
                 string outputDir = Path.Combine(Directory.GetCurrentDirectory(), "generated-code");
                 string? ignoredFilenamesPath = null;
 
-                // Debug output
-                Console.WriteLine("Received arguments:");
-                for (int i = 0; i < args.Length; i++)
-                {
-                    Console.WriteLine($"args[{i}] = '{args[i]}'");
-                }
+                // (Verbose argument output removed)
 
                 // Parse command line arguments
                 for (int i = 0; i < args.Length; i++)
@@ -34,24 +29,20 @@ namespace ReflectionGenerator
                     // Skip '--' argument if present
                     if (arg == "--")
                     {
-                        Console.WriteLine("Skipping '--' argument");
                         continue;
                     }
                         
                     if (arg == "--dll" && i + 1 < args.Length)
                     {
                         dllPath = args[++i];
-                        Console.WriteLine($"Found --dll parameter: {dllPath}");
                     }
                     else if (arg == "--output" && i + 1 < args.Length)
                     {
                         outputDir = args[++i];
-                        Console.WriteLine($"Found --output parameter: {outputDir}");
                     }
                     else if (arg == "--ignored-filenames" && i + 1 < args.Length)
                     {
                         ignoredFilenamesPath = args[++i];
-                        Console.WriteLine($"Found --ignored-filenames parameter: {ignoredFilenamesPath}");
                     }
                 }
 
@@ -82,7 +73,6 @@ namespace ReflectionGenerator
                         .Where(line => !string.IsNullOrWhiteSpace(line))
                         .Select(line => line.Trim()),
                         StringComparer.OrdinalIgnoreCase);
-                    Console.WriteLine($"Loaded {_ignoredStopwords.Count} stopwords from {ignoredFilenamesPath}");
                 }
 
                 Console.WriteLine($"Processing DLL: {dllPath}");
@@ -111,6 +101,7 @@ namespace ReflectionGenerator
                                 continue;
                             }
 
+                            Console.WriteLine($"Generating {fileName}...");
                             GenerateTypeScaffolding(type, outputDir);
                             processedTypes++;
                         }
@@ -146,21 +137,18 @@ namespace ReflectionGenerator
             if ((type.IsClass || type.IsValueType) && !type.IsInterface && !type.IsEnum)
             {
                 sb.AppendLine("[Serializable]");
-                Console.WriteLine($"Adding [Serializable] to {type.Name}");
             }
 
             // Add [DataContract] for classes
             if (type.IsClass && !type.IsInterface && !type.IsEnum)
             {
                 sb.AppendLine("[DataContract]");
-                Console.WriteLine($"Adding [DataContract] to {type.Name}");
             }
 
             // Add [Flags] for enums with FlagsAttribute
             if (type.IsEnum && type.CustomAttributes.Any(a => a.AttributeType.FullName == "System.FlagsAttribute"))
             {
                 sb.AppendLine("[Flags]");
-                Console.WriteLine($"Adding [Flags] to {type.Name}");
             }
 
             // Add [Obsolete] if present
@@ -169,7 +157,6 @@ namespace ReflectionGenerator
             {
                 var msg = obsoleteAttr.ConstructorArguments.Count > 0 ? obsoleteAttr.ConstructorArguments[0].Value?.ToString() : null;
                 sb.AppendLine(msg != null ? $"[Obsolete(\"{msg}\")]" : "[Obsolete]");
-                Console.WriteLine($"Adding [Obsolete] to {type.Name}");
             }
 
             // Add namespace
@@ -216,12 +203,6 @@ namespace ReflectionGenerator
                 var filePath = Path.Combine(outputDir, fileName);
                 var content = sb.ToString();
                 File.WriteAllText(filePath, content);
-
-                // Debug output
-                Console.WriteLine($"Generated file {fileName} with content:");
-                Console.WriteLine("---");
-                Console.WriteLine(content);
-                Console.WriteLine("---");
             }
             else
             {
@@ -301,12 +282,6 @@ namespace ReflectionGenerator
                 var filePath = Path.Combine(outputDir, fileName);
                 var content = sb.ToString();
                 File.WriteAllText(filePath, content);
-
-                // Debug output
-                Console.WriteLine($"Generated file {fileName} with content:");
-                Console.WriteLine("---");
-                Console.WriteLine(content);
-                Console.WriteLine("---");
 
                 // Recursively process nested types (e.g., enums inside classes)
                 foreach (var nestedType in type.NestedTypes)
