@@ -141,7 +141,7 @@ namespace ReflectionGenerator
         private static void GenerateTypeScaffolding(TypeDefinition type, string outputDir)
         {
             var sb = new StringBuilder();
-            
+
             // Add [Serializable] for classes/structs
             if ((type.IsClass || type.IsValueType) && !type.IsInterface && !type.IsEnum)
             {
@@ -179,89 +179,141 @@ namespace ReflectionGenerator
                 sb.AppendLine("{");
             }
 
-            // Add type declaration
-            var typeKind = type.IsInterface ? "interface" : 
-                          type.IsEnum ? "enum" : 
-                          type.IsValueType ? "struct" : "class";
-            var partial = "partial ";
-            var baseType = type.BaseType != null && type.BaseType.FullName != "System.Object" && !type.IsEnum ? $" : {GetTypeName(type.BaseType)}" : "";
-            var interfaces = type.Interfaces.Any() ? 
-                (baseType == "" ? " : " : ", ") + 
-                string.Join(", ", type.Interfaces.Select(i => GetTypeName(i.InterfaceType))) : "";
-
-            sb.AppendLine($"    public {partial}{typeKind} {type.Name}{baseType}{interfaces}");
-            sb.AppendLine("    {");
-
-            // #region Properties
-            sb.AppendLine("        #region Properties");
-            foreach (var property in type.Properties)
+            // Handle enum generation
+            if (type.IsEnum)
             {
-                if (property.GetMethod?.IsPublic == true || property.SetMethod?.IsPublic == true)
+                sb.AppendLine($"    public enum {type.Name}");
+                sb.AppendLine("    {");
+                // Only include fields that are enum members (not special fields)
+                var enumFields = type.Fields
+                    .Where(f => f.IsStatic && f.HasConstant && !f.Name.StartsWith("value__"))
+                    .ToList();
+                for (int i = 0; i < enumFields.Count; i++)
                 {
-                    // Add XML doc comment for property
-                    sb.AppendLine("        /// <summary>");
-                    sb.AppendLine($"        /// Gets or sets the {property.Name}.");
-                    sb.AppendLine("        /// </summary>");
-                    // Add [DataMember] for properties
-                    sb.AppendLine("        [DataMember]");
+                    var field = enumFields[i];
+                    var value = field.Constant;
                     // Add [Obsolete] if present
-                    var propObsolete = property.CustomAttributes.FirstOrDefault(a => a.AttributeType.FullName == "System.ObsoleteAttribute");
-                    if (propObsolete != null)
+                    var fieldObsolete = field.CustomAttributes.FirstOrDefault(a => a.AttributeType.FullName == "System.ObsoleteAttribute");
+                    if (fieldObsolete != null)
                     {
-                        var msg = propObsolete.ConstructorArguments.Count > 0 ? propObsolete.ConstructorArguments[0].Value?.ToString() : null;
+                        var msg = fieldObsolete.ConstructorArguments.Count > 0 ? fieldObsolete.ConstructorArguments[0].Value?.ToString() : null;
                         sb.AppendLine(msg != null ? $"        [Obsolete(\"{msg}\")]" : "        [Obsolete]");
                     }
-                    sb.AppendLine($"        public {GetTypeName(property.PropertyType)} {property.Name} {{ get; set; }}");
+                    sb.Append($"        {field.Name} = {value}");
+                    if (i < enumFields.Count - 1)
+                        sb.AppendLine(",");
+                    else
+                        sb.AppendLine();
                 }
-            }
-            sb.AppendLine("        #endregion");
-
-            // #region Methods
-            sb.AppendLine("        #region Methods");
-            foreach (var method in type.Methods)
-            {
-                if (method.IsPublic && !method.IsConstructor && !method.IsSpecialName)
+                sb.AppendLine("    }");
+                if (!string.IsNullOrEmpty(type.Namespace))
                 {
-                    // Add XML doc comment for method
-                    sb.AppendLine("        /// <summary>");
-                    sb.AppendLine($"        /// {method.Name} method.");
-                    sb.AppendLine("        /// </summary>");
-                    foreach (var param in method.Parameters)
-                        sb.AppendLine($"        /// <param name=\"{param.Name}\">{param.ParameterType.Name}</param>");
-                    if (method.ReturnType.FullName != "System.Void")
-                        sb.AppendLine($"        /// <returns>{method.ReturnType.Name}</returns>");
-                    // Add [Obsolete] if present
-                    var methObsolete = method.CustomAttributes.FirstOrDefault(a => a.AttributeType.FullName == "System.ObsoleteAttribute");
-                    if (methObsolete != null)
+                    sb.AppendLine("}");
+                }
+
+                // Write to file
+                var fileName = !string.IsNullOrEmpty(type.Namespace) ? $"{type.Namespace}.{type.Name}.cs" : $"{type.Name}.cs";
+                var filePath = Path.Combine(outputDir, fileName);
+                var content = sb.ToString();
+                File.WriteAllText(filePath, content);
+
+                // Debug output
+                Console.WriteLine($"Generated file {fileName} with content:");
+                Console.WriteLine("---");
+                Console.WriteLine(content);
+                Console.WriteLine("---");
+            }
+            else
+            {
+                // Add type declaration
+                var typeKind = type.IsInterface ? "interface" :
+                              type.IsValueType ? "struct" : "class";
+                var partial = "partial ";
+                var baseType = type.BaseType != null && type.BaseType.FullName != "System.Object" && !type.IsEnum ? $" : {GetTypeName(type.BaseType)}" : "";
+                var interfaces = type.Interfaces.Any() ?
+                    (baseType == "" ? " : " : ", ") +
+                    string.Join(", ", type.Interfaces.Select(i => GetTypeName(i.InterfaceType))) : "";
+
+                sb.AppendLine($"    public {partial}{typeKind} {type.Name}{baseType}{interfaces}");
+                sb.AppendLine("    {");
+
+                // #region Properties
+                sb.AppendLine("        #region Properties");
+                foreach (var property in type.Properties)
+                {
+                    if (property.GetMethod?.IsPublic == true || property.SetMethod?.IsPublic == true)
                     {
-                        var msg = methObsolete.ConstructorArguments.Count > 0 ? methObsolete.ConstructorArguments[0].Value?.ToString() : null;
-                        sb.AppendLine(msg != null ? $"        [Obsolete(\"{msg}\")]" : "        [Obsolete]");
+                        // Add XML doc comment for property
+                        sb.AppendLine("        /// <summary>");
+                        sb.AppendLine($"        /// Gets or sets the {property.Name}.");
+                        sb.AppendLine("        /// </summary>");
+                        // Add [DataMember] for properties
+                        sb.AppendLine("        [DataMember]");
+                        // Add [Obsolete] if present
+                        var propObsolete = property.CustomAttributes.FirstOrDefault(a => a.AttributeType.FullName == "System.ObsoleteAttribute");
+                        if (propObsolete != null)
+                        {
+                            var msg = propObsolete.ConstructorArguments.Count > 0 ? propObsolete.ConstructorArguments[0].Value?.ToString() : null;
+                            sb.AppendLine(msg != null ? $"        [Obsolete(\"{msg}\")]" : "        [Obsolete]");
+                        }
+                        sb.AppendLine($"        public {GetTypeName(property.PropertyType)} {property.Name} {{ get; set; }}");
                     }
-                    var parameters = string.Join(", ", method.Parameters.Select(p => 
-                        $"{GetTypeName(p.ParameterType)} {p.Name}"));
-                    sb.AppendLine($"        public {GetTypeName(method.ReturnType)} {method.Name}({parameters});");
+                }
+                sb.AppendLine("        #endregion");
+
+                // #region Methods
+                sb.AppendLine("        #region Methods");
+                foreach (var method in type.Methods)
+                {
+                    if (method.IsPublic && !method.IsConstructor && !method.IsSpecialName)
+                    {
+                        // Add XML doc comment for method
+                        sb.AppendLine("        /// <summary>");
+                        sb.AppendLine($"        /// {method.Name} method.");
+                        sb.AppendLine("        /// </summary>");
+                        foreach (var param in method.Parameters)
+                            sb.AppendLine($"        /// <param name=\"{param.Name}\">{param.ParameterType.Name}</param>");
+                        if (method.ReturnType.FullName != "System.Void")
+                            sb.AppendLine($"        /// <returns>{method.ReturnType.Name}</returns>");
+                        // Add [Obsolete] if present
+                        var methObsolete = method.CustomAttributes.FirstOrDefault(a => a.AttributeType.FullName == "System.ObsoleteAttribute");
+                        if (methObsolete != null)
+                        {
+                            var msg = methObsolete.ConstructorArguments.Count > 0 ? methObsolete.ConstructorArguments[0].Value?.ToString() : null;
+                            sb.AppendLine(msg != null ? $"        [Obsolete(\"{msg}\")]" : "        [Obsolete]");
+                        }
+                        var parameters = string.Join(", ", method.Parameters.Select(p =>
+                            $"{GetTypeName(p.ParameterType)} {p.Name}"));
+                        sb.AppendLine($"        public {GetTypeName(method.ReturnType)} {method.Name}({parameters});");
+                    }
+                }
+                sb.AppendLine("        #endregion");
+
+                // Close type and namespace
+                sb.AppendLine("    }");
+                if (!string.IsNullOrEmpty(type.Namespace))
+                {
+                    sb.AppendLine("}");
+                }
+
+                // Write to file
+                var fileName = !string.IsNullOrEmpty(type.Namespace) ? $"{type.Namespace}.{type.Name}.cs" : $"{type.Name}.cs";
+                var filePath = Path.Combine(outputDir, fileName);
+                var content = sb.ToString();
+                File.WriteAllText(filePath, content);
+
+                // Debug output
+                Console.WriteLine($"Generated file {fileName} with content:");
+                Console.WriteLine("---");
+                Console.WriteLine(content);
+                Console.WriteLine("---");
+
+                // Recursively process nested types (e.g., enums inside classes)
+                foreach (var nestedType in type.NestedTypes)
+                {
+                    GenerateTypeScaffolding(nestedType, outputDir);
                 }
             }
-            sb.AppendLine("        #endregion");
-
-            // Close type and namespace
-            sb.AppendLine("    }");
-            if (!string.IsNullOrEmpty(type.Namespace))
-            {
-                sb.AppendLine("}");
-            }
-
-            // Write to file
-            var fileName = !string.IsNullOrEmpty(type.Namespace) ? $"{type.Namespace}.{type.Name}.cs" : $"{type.Name}.cs";
-            var filePath = Path.Combine(outputDir, fileName);
-            var content = sb.ToString();
-            File.WriteAllText(filePath, content);
-            
-            // Debug output
-            Console.WriteLine($"Generated file {fileName} with content:");
-            Console.WriteLine("---");
-            Console.WriteLine(content);
-            Console.WriteLine("---");
         }
 
         private static string GetTypeName(TypeReference type)

@@ -37,13 +37,14 @@ dotnet build
 Run the tool with the following command:
 
 ```bash
-dotnet run -- --dll=<path-to-dll> [--output=<output-directory>]
+dotnet run -- --dll=<path-to-dll> [--output=<output-directory>] [--ignored-filenames=<path-to-stopwords-file>]
 ```
 
 ### Parameters
 
 - `--dll`: Path to the DLL file to process (required)
 - `--output`: Output directory for generated code (default: `./generated-code`)
+- `--ignored-filenames`: Path to a file containing stopwords to ignore in generated filenames (optional)
 
 ### Example
 
@@ -51,8 +52,8 @@ To generate code based on the most important files containing NinjaTrader's publ
 
 ```bash
 dotnet run -- --dll=<path-to-dll> [--output=<output-directory>]
-dotnet run -- --dll="C:\Users\<yourusername>\Documents\NinjaTrader 8\bin\Custom\NinjaTrader.Vendor.dll" -output="<output-directory-root>\Vendor"
-dotnet run -- --dll="C:\Users\<yourusername>\Documents\NinjaTrader 8\bin\Custom\NinjaTrader.Custom.dll" -output="<output-directory-root>\Custom"
+dotnet run -- --dll="C:\Users\<yourusername>\Documents\NinjaTrader 8\bin\Custom\NinjaTrader.Vendor.dll" --output="<output-directory-root>\Vendor"
+dotnet run -- --dll="C:\Users\<yourusername>\Documents\NinjaTrader 8\bin\Custom\NinjaTrader.Custom.dll" --output="<output-directory-root>\Custom"
 dotnet run -- --dll="%ProgramFiles%\NinjaTrader 8\bin\NinjaTrader.Client.dll" --output="<output-directory-root>\Client"
 ```
 
