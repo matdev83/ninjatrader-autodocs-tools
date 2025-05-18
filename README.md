@@ -100,7 +100,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - All data and code here are derived from **publicly exported structures** that can be legally inferred through .NET reflection.
 - The author is **not affiliated with NinjaTrader** or its parent companies.
 - **Use of the NinjaTrader 8 platform requires a valid license** and is subject to its licensing agreement.  
-  You must comply with all terms and only use these materials if you are properly licensed.
+  You must comply with all terms and only use these materials if you are properly licensed. 
 
 ---
 
