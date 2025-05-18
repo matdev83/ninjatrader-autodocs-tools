@@ -37,7 +37,7 @@ dotnet build
 Run the tool with the following command:
 
 ```bash
-dotnet run -- --dll=<path-to-dll> [--output=<output-directory>] [--ignored-filenames=<path-to-stopwords-file>]
+dotnet run -- --dll <path-to-dll> [--output <output-directory>] [--ignored-filenames<path-to-stopwords-file>]
 ```
 
 ### Parameters
