@@ -1,3 +1,5 @@
 generated-code/
 ReflectionGenerator/bin/
 ReflectionGenerator/obj/
+ReflectionGenerator.Tests/obj/
+ReflectionGenerator.Tests/bin/

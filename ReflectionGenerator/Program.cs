@@ -8,7 +8,7 @@ using System.Collections.Generic;
 
 namespace ReflectionGenerator
 {
-    class Program
+    public class Program
     {
         private static HashSet<string>? _ignoredStopwords;
 
@@ -89,12 +89,28 @@ namespace ReflectionGenerator
                 {
                     try
                     {
-                        if (ShouldProcessType(type))
-                        {
-                            // Sanitize components for filename used in logging and stopword check
-                            var sanitizedTypeNameForDisplay = SanitizeFileNameComponent(type.Name.Split('`')[0]);
-                            var sanitizedNamespaceForDisplay = !string.IsNullOrEmpty(type.Namespace) ? SanitizeFileNameComponent(type.Namespace) : null;
-                            var fileName = !string.IsNullOrEmpty(sanitizedNamespaceForDisplay) ? $"{sanitizedNamespaceForDisplay}.{sanitizedTypeNameForDisplay}.cs" : $"{sanitizedTypeNameForDisplay}.cs";
+            if (ShouldProcessType(type))
+            {
+                // Check if original type name starts with underscore
+                if (type.Name.StartsWith("_"))
+                {
+                    Console.WriteLine($"Skipping {type.Name} - starts with underscore in original name");
+                    skippedTypes++;
+                    continue;
+                }
+
+                // Sanitize components for filename used in logging and stopword check
+                var sanitizedTypeNameForDisplay = SanitizeFileNameComponent(type.Name.Split('`')[0]);
+                var sanitizedNamespaceForDisplay = !string.IsNullOrEmpty(type.Namespace) ? SanitizeFileNameComponent(type.Namespace) : null;
+                var fileName = !string.IsNullOrEmpty(sanitizedNamespaceForDisplay) ? $"{sanitizedNamespaceForDisplay}.{sanitizedTypeNameForDisplay}.cs" : $"{sanitizedTypeNameForDisplay}.cs";
+                
+                // Check if filename starts with underscore after sanitization
+                if (fileName.StartsWith("_"))
+                {
+                    Console.WriteLine($"Skipping {fileName} - starts with underscore");
+                    skippedTypes++;
+                    continue;
+                }
                             
                             // Check if filename contains any stopwords
                             if (_ignoredStopwords != null && _ignoredStopwords.Any(stopword => fileName.Contains(stopword, StringComparison.OrdinalIgnoreCase)))
@@ -124,15 +140,15 @@ namespace ReflectionGenerator
             }
         }
 
-        internal static bool ShouldProcessType(TypeDefinition type)
+        public static bool ShouldProcessType(TypeDefinition type)
         {
             // Skip compiler-generated types and non-public types
-            return type.IsPublic && 
-                   !type.Name.Contains("<>") && 
-                   !type.Name.Contains("__");
+            return type.IsPublic &&
+                   !type.Name.StartsWith("<") &&
+                   !type.Name.StartsWith("_");
         }
 
-        internal static void GenerateTypeScaffolding(TypeDefinition type, string outputDir)
+        public static void GenerateTypeScaffolding(TypeDefinition type, string outputDir)
         {
             var sb = new StringBuilder();
 
@@ -173,13 +189,13 @@ namespace ReflectionGenerator
             // Handle enum generation
             if (type.IsEnum)
             {
-                sb.AppendLine($"    public enum {GetTypeName(type)} : {GetTypeName(type.GetEnumUnderlyingType())}"); // Explicitly show underlying type
+                        var underlyingType = type.Fields.FirstOrDefault(f => f.Name == "value__")?.FieldType ?? type.Module.TypeSystem.Int32;
+                        sb.AppendLine($"    public enum {GetTypeName(type)} : {GetTypeName(underlyingType)}");
                 sb.AppendLine("    {");
                 // Only include fields that are enum members (not special fields)
                 var enumFields = type.Fields
                     .Where(f => f.IsStatic && f.HasConstant && !f.Name.StartsWith("value__"))
                     .ToList();
-                var underlyingType = type.GetEnumUnderlyingType(); // Get the underlying type once
 
                 for (int i = 0; i < enumFields.Count; i++)
                 {
@@ -321,11 +337,11 @@ namespace ReflectionGenerator
                         }
                         
                         string methodGenericParams = "";
+                        var methodConstraints = new StringBuilder();
                         if (method.HasGenericParameters)
                         {
                             methodGenericParams = "<" + string.Join(", ", method.GenericParameters.Select(p => p.Name)) + ">";
                             // Append constraints for method generic parameters
-                            var methodConstraints = new StringBuilder();
                             foreach (var param in method.GenericParameters)
                             {
                                 var paramConstraints = param.Constraints.Select(c => GetTypeName(c.ConstraintType)).ToList();
@@ -334,15 +350,39 @@ namespace ReflectionGenerator
                                 if (param.HasDefaultConstructorConstraint && !param.HasNotNullableValueTypeConstraint) paramConstraints.Add("new()");
                                 if (paramConstraints.Count > 0)
                                 {
-                                    methodConstraints.Append($" where {param.Name} : {string.Join(", ", paramConstraints)}");
+                                    methodConstraints.Append($"where {param.Name} : {string.Join(", ", paramConstraints)}");
                                 }
                             }
-                            methodGenericParams += methodConstraints.ToString();
+                            if (methodConstraints.Length > 0)
+                            {
+                                sb.AppendLine();
+                                sb.AppendLine();
+                                sb.Append($"            {methodConstraints.ToString().Trim()}");
+                            }
                         }
 
                         var parameters = string.Join(", ", method.Parameters.Select(p =>
                             $"{GetTypeName(p.ParameterType)} {p.Name}"));
-                        sb.AppendLine($"        public {GetTypeName(method.ReturnType)} {method.Name}{methodGenericParams}({parameters});");
+                        if (type.IsInterface)
+                        {
+                            sb.Append($"        public {GetTypeName(method.ReturnType)} {method.Name}{methodGenericParams}({parameters})");
+                            if (methodConstraints.Length > 0)
+                            {
+                                sb.Append($" {methodConstraints.ToString().Trim()}");
+                            }
+                            sb.AppendLine(";");
+                        }
+                        else
+                        {
+                            sb.AppendLine($"        public {GetTypeName(method.ReturnType)} {method.Name}{methodGenericParams}({parameters})");
+                            if (methodConstraints.Length > 0)
+                            {
+                                sb.AppendLine($"            {methodConstraints.ToString().Trim()}");
+                            }
+                            sb.AppendLine("        {");
+                            sb.AppendLine("            // Method implementation goes here");
+                            sb.AppendLine("        }");
+                        }
                     }
                 }
                 sb.AppendLine("        #endregion");
@@ -364,20 +404,29 @@ namespace ReflectionGenerator
 
                 foreach (var nestedType in type.NestedTypes)
                 {
-                    // For nested types, the output directory is the same.
-                    // GenerateTypeScaffolding will handle their full names correctly.
-                    GenerateTypeScaffolding(nestedType, outputDir);
+                    if (ShouldProcessType(nestedType))
+                    {
+                        // For nested types, the output directory is the same.
+                        // GenerateTypeScaffolding will handle their full names correctly.
+                        GenerateTypeScaffolding(nestedType, outputDir);
+                    }
                 }
             }
         }
 
-        internal static string GetTypeName(TypeReference type)
+        public static string GetTypeName(TypeReference type)
         {
+            // Handle enum types - return their actual name
+            if (type.Resolve()?.IsEnum == true)
+            {
+                return type.Name;
+            }
             if (type.IsGenericParameter)
                 return type.Name;
 
             string fullName = type.FullName.Replace("/", "."); // Handle nested type names like declaringType.NestedType
 
+            // Rest of the original GetTypeName implementation
             if (type.IsGenericInstance)
             {
                 var genericType = (GenericInstanceType)type;
@@ -427,7 +476,7 @@ namespace ReflectionGenerator
             }
         }
 
-        internal static string? EscapeStringForAttribute(string? message)
+        public static string? EscapeStringForAttribute(string? message)
         {
             if (string.IsNullOrEmpty(message))
             {
@@ -465,7 +514,7 @@ namespace ReflectionGenerator
             return sb.ToString();
         }
 
-        internal static string FormatEnumMemberValue(object value, TypeReference underlyingType)
+        public static string FormatEnumMemberValue(object value, TypeReference underlyingType)
         {
             // field.Constant gives the value directly in its underlying type (e.g., int, long, byte).
             // We need to ensure it's formatted correctly for C# source code.
@@ -502,7 +551,7 @@ namespace ReflectionGenerator
             return value.ToString();
         }
 
-        internal static string SanitizeFileNameComponent(string component)
+        public static string SanitizeFileNameComponent(string component)
         {
             if (string.IsNullOrEmpty(component))
             {

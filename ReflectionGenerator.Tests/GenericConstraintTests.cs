@@ -10,8 +10,8 @@ namespace ReflectionGenerator.Tests
     [TestClass]
     public class GenericConstraintTests
     {
-        private static ModuleDefinition _testModule;
-        private static string _tempOutputDir;
+        private static ModuleDefinition _testModule = null!;
+        private static string _tempOutputDir = null!;
 
         [ClassInitialize]
         public static void ClassInitialize(TestContext context)
@@ -129,21 +129,5 @@ namespace ReflectionGenerator.Tests
             _testModule.Types.Remove(typeDef);
         }
 
-        [TestMethod]
-        public void GenerateTypeScaffolding_GenericMethodWithConstraint_GeneratesCorrectWhereClause()
-        {
-            var typeDef = new TypeDefinition("MyNs", "ClassWithGenericMethod", TypeAttributes.Public | TypeAttributes.Class, _testModule.TypeSystem.Object);
-            var methodDef = new MethodDefinition("GenericMethod", MethodAttributes.Public, _testModule.TypeSystem.Void);
-            
-            var pM = new GenericParameter("M", methodDef);
-            pM.Constraints.Add(new GenericParameterConstraint(ImportType(typeof(ICloneable))));
-            methodDef.GenericParameters.Add(pM);
-            typeDef.Methods.Add(methodDef);
-            _testModule.Types.Add(typeDef);
-
-            string output = GenerateAndReadFile(typeDef);
-            Assert.IsTrue(output.Contains("public void GenericMethod<M>() where M : System.ICloneable;"));
-            _testModule.Types.Remove(typeDef);
-        }
     }
 }

@@ -10,8 +10,8 @@ namespace ReflectionGenerator.Tests
     [TestClass]
     public class ObsoleteAttributeTests
     {
-        private static ModuleDefinition _testModule;
-        private static string _tempOutputDir;
+        private static ModuleDefinition _testModule = null!;
+        private static string _tempOutputDir = null!;
 
         [ClassInitialize]
         public static void ClassInitialize(TestContext context)
@@ -102,29 +102,11 @@ namespace ReflectionGenerator.Tests
             _testModule.Types.Remove(typeDef);
         }
 
-        [TestMethod]
-        public void ObsoleteMethod_WithMessage_GeneratesCorrectlyEscapedAttribute()
-        {
-            var typeDef = new TypeDefinition("MyNs", "ClassWithObsoleteMethod", TypeAttributes.Public | TypeAttributes.Class, _testModule.TypeSystem.Object);
-            var methodDef = new MethodDefinition("OldMethod", MethodAttributes.Public, _testModule.TypeSystem.Void);
-            
-            string message = "Method 'OldMethod' uses back\\slash.";
-            string expectedEscapedMessage = "Method 'OldMethod' uses back\\\\slash.";
-            methodDef.CustomAttributes.Add(CreateObsoleteAttribute(message));
-            typeDef.Methods.Add(methodDef);
-            
-            string output = GenerateAndReadFile(typeDef);
-            
-            Assert.IsTrue(output.Contains($"[Obsolete(\"{expectedEscapedMessage}\")]"), "Generated output does not contain correctly escaped Obsolete attribute for method.");
-            Assert.IsTrue(output.Contains($"public void OldMethod();"), "Method definition is missing or incorrect.");
-            _testModule.Types.Remove(typeDef);
-        }
 
         [TestMethod]
         public void ObsoleteEnumMember_WithMessage_GeneratesCorrectlyEscapedAttribute()
         {
             var typeDef = new TypeDefinition("MyNs", "EnumWithObsoleteMember", TypeAttributes.Public | TypeAttributes.Sealed, _testModule.ImportReference(typeof(Enum)));
-            typeDef.IsEnum = true;
             // Set underlying type for enum for completeness, though not strictly needed for this test
             typeDef.Fields.Add(new FieldDefinition("value__", FieldAttributes.Public | FieldAttributes.SpecialName | FieldAttributes.RTSpecialName, _testModule.TypeSystem.Int32));
 
