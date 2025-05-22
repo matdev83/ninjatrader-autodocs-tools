@@ -91,7 +91,10 @@ namespace ReflectionGenerator
                     {
                         if (ShouldProcessType(type))
                         {
-                            var fileName = !string.IsNullOrEmpty(type.Namespace) ? $"{type.Namespace}.{type.Name}.cs" : $"{type.Name}.cs";
+                            // Sanitize components for filename used in logging and stopword check
+                            var sanitizedTypeNameForDisplay = SanitizeFileNameComponent(type.Name.Split('`')[0]);
+                            var sanitizedNamespaceForDisplay = !string.IsNullOrEmpty(type.Namespace) ? SanitizeFileNameComponent(type.Namespace) : null;
+                            var fileName = !string.IsNullOrEmpty(sanitizedNamespaceForDisplay) ? $"{sanitizedNamespaceForDisplay}.{sanitizedTypeNameForDisplay}.cs" : $"{sanitizedTypeNameForDisplay}.cs";
                             
                             // Check if filename contains any stopwords
                             if (_ignoredStopwords != null && _ignoredStopwords.Any(stopword => fileName.Contains(stopword, StringComparison.OrdinalIgnoreCase)))
@@ -121,7 +124,7 @@ namespace ReflectionGenerator
             }
         }
 
-        private static bool ShouldProcessType(TypeDefinition type)
+        internal static bool ShouldProcessType(TypeDefinition type)
         {
             // Skip compiler-generated types and non-public types
             return type.IsPublic && 
@@ -129,7 +132,7 @@ namespace ReflectionGenerator
                    !type.Name.Contains("__");
         }
 
-        private static void GenerateTypeScaffolding(TypeDefinition type, string outputDir)
+        internal static void GenerateTypeScaffolding(TypeDefinition type, string outputDir)
         {
             var sb = new StringBuilder();
 
@@ -156,7 +159,8 @@ namespace ReflectionGenerator
             if (obsoleteAttr != null)
             {
                 var msg = obsoleteAttr.ConstructorArguments.Count > 0 ? obsoleteAttr.ConstructorArguments[0].Value?.ToString() : null;
-                sb.AppendLine(msg != null ? $"[Obsolete(\"{msg}\")]" : "[Obsolete]");
+                var escapedMsg = EscapeStringForAttribute(msg);
+                sb.AppendLine(escapedMsg != null ? $"[Obsolete(\"{escapedMsg}\")]" : "[Obsolete]");
             }
 
             // Add namespace
@@ -169,24 +173,29 @@ namespace ReflectionGenerator
             // Handle enum generation
             if (type.IsEnum)
             {
-                sb.AppendLine($"    public enum {type.Name}");
+                sb.AppendLine($"    public enum {GetTypeName(type)} : {GetTypeName(type.GetEnumUnderlyingType())}"); // Explicitly show underlying type
                 sb.AppendLine("    {");
                 // Only include fields that are enum members (not special fields)
                 var enumFields = type.Fields
                     .Where(f => f.IsStatic && f.HasConstant && !f.Name.StartsWith("value__"))
                     .ToList();
+                var underlyingType = type.GetEnumUnderlyingType(); // Get the underlying type once
+
                 for (int i = 0; i < enumFields.Count; i++)
                 {
                     var field = enumFields[i];
                     var value = field.Constant;
+                    string valueString = FormatEnumMemberValue(value, underlyingType);
+
                     // Add [Obsolete] if present
                     var fieldObsolete = field.CustomAttributes.FirstOrDefault(a => a.AttributeType.FullName == "System.ObsoleteAttribute");
                     if (fieldObsolete != null)
                     {
                         var msg = fieldObsolete.ConstructorArguments.Count > 0 ? fieldObsolete.ConstructorArguments[0].Value?.ToString() : null;
-                        sb.AppendLine(msg != null ? $"        [Obsolete(\"{msg}\")]" : "        [Obsolete]");
+                        var escapedMsg = EscapeStringForAttribute(msg);
+                        sb.AppendLine(escapedMsg != null ? $"        [Obsolete(\"{escapedMsg}\")]" : "        [Obsolete]");
                     }
-                    sb.Append($"        {field.Name} = {value}");
+                    sb.Append($"        {field.Name} = {valueString}");
                     if (i < enumFields.Count - 1)
                         sb.AppendLine(",");
                     else
@@ -199,8 +208,10 @@ namespace ReflectionGenerator
                 }
 
                 // Write to file
-                var fileName = !string.IsNullOrEmpty(type.Namespace) ? $"{type.Namespace}.{type.Name}.cs" : $"{type.Name}.cs";
-                var filePath = Path.Combine(outputDir, fileName);
+                var sanitizedEnumTypeName = SanitizeFileNameComponent(GetTypeName(type)); // GetTypeName for enum returns simple name
+                var sanitizedEnumNamespace = !string.IsNullOrEmpty(type.Namespace) ? SanitizeFileNameComponent(type.Namespace) : null;
+                var enumFileName = !string.IsNullOrEmpty(sanitizedEnumNamespace) ? $"{sanitizedEnumNamespace}.{sanitizedEnumTypeName}.cs" : $"{sanitizedEnumTypeName}.cs";
+                var filePath = Path.Combine(outputDir, enumFileName);
                 var content = sb.ToString();
                 File.WriteAllText(filePath, content);
             }
@@ -209,13 +220,61 @@ namespace ReflectionGenerator
                 // Add type declaration
                 var typeKind = type.IsInterface ? "interface" :
                               type.IsValueType ? "struct" : "class";
-                var partial = "partial ";
-                var baseType = type.BaseType != null && type.BaseType.FullName != "System.Object" && !type.IsEnum ? $" : {GetTypeName(type.BaseType)}" : "";
-                var interfaces = type.Interfaces.Any() ?
-                    (baseType == "" ? " : " : ", ") +
-                    string.Join(", ", type.Interfaces.Select(i => GetTypeName(i.InterfaceType))) : "";
+                var partial = "partial "; // Assuming all generated types are partial
+                
+                // Use GetTypeName for the type name itself, base type, and interfaces
+                string typeNameString = GetTypeName(type);
+                
+                // For baseType, ensure it's not System.Object and not an enum's implicit base.
+                var baseTypeString = "";
+                if (type.BaseType != null && type.BaseType.FullName != "System.Object" && !type.IsEnum)
+                {
+                    baseTypeString = $" : {GetTypeName(type.BaseType)}";
+                }
 
-                sb.AppendLine($"    public {partial}{typeKind} {type.Name}{baseType}{interfaces}");
+                var interfacesString = "";
+                if (type.Interfaces.Any())
+                {
+                    interfacesString = (baseTypeString == "" ? " : " : ", ") +
+                                     string.Join(", ", type.Interfaces.Select(i => GetTypeName(i.InterfaceType)));
+                }
+
+                // Remove potential namespace qualifier from the type name for declaration if it's in the current namespace
+                string localTypeName = typeNameString;
+                if (!string.IsNullOrEmpty(type.Namespace) && typeNameString.StartsWith(type.Namespace + "."))
+                {
+                     localTypeName = typeNameString.Substring(type.Namespace.Length + 1);
+                }
+                // If the type is nested, only the final part of the name should be used for declaration.
+                // GetTypeName returns full path like MyNamespace.OuterType.NestedType
+                // We only want NestedType for the declaration if OuterType is the current scope.
+                // However, GenerateTypeScaffolding is called for top-level types first, 
+                // and recursively for nested types. So, type.Name is appropriate here.
+                // The GetTypeName will handle the full name for base types and interfaces.
+                // The type name in declaration should be simple name if not generic, or simpleName<T> if generic.
+                // Let's adjust how typeNameString is used for the declaration:
+                string declarationName = type.Name; // Start with simple name
+                if (type.HasGenericParameters)
+                {
+                    declarationName = type.Name.Split('`')[0] + "<" + string.Join(", ", type.GenericParameters.Select(p => p.Name)) + ">";
+                    // Append constraints if any, directly to the declaration name
+                    var constraints = new StringBuilder();
+                    foreach (var param in type.GenericParameters)
+                    {
+                        var paramConstraints = param.Constraints.Select(c => GetTypeName(c.ConstraintType)).ToList();
+                        if (param.HasReferenceTypeConstraint) paramConstraints.Insert(0, "class");
+                        if (param.HasNotNullableValueTypeConstraint) paramConstraints.Insert(0, "struct");
+                        if (param.HasDefaultConstructorConstraint && !param.HasNotNullableValueTypeConstraint) paramConstraints.Add("new()");
+                        if (paramConstraints.Count > 0)
+                        {
+                            constraints.Append($" where {param.Name} : {string.Join(", ", paramConstraints)}");
+                        }
+                    }
+                    declarationName += constraints.ToString();
+                }
+
+
+                sb.AppendLine($"    public {partial}{typeKind} {declarationName}{baseTypeString}{interfacesString}");
                 sb.AppendLine("    {");
 
                 // #region Properties
@@ -224,18 +283,16 @@ namespace ReflectionGenerator
                 {
                     if (property.GetMethod?.IsPublic == true || property.SetMethod?.IsPublic == true)
                     {
-                        // Add XML doc comment for property
                         sb.AppendLine("        /// <summary>");
                         sb.AppendLine($"        /// Gets or sets the {property.Name}.");
                         sb.AppendLine("        /// </summary>");
-                        // Add [DataMember] for properties
                         sb.AppendLine("        [DataMember]");
-                        // Add [Obsolete] if present
                         var propObsolete = property.CustomAttributes.FirstOrDefault(a => a.AttributeType.FullName == "System.ObsoleteAttribute");
                         if (propObsolete != null)
                         {
                             var msg = propObsolete.ConstructorArguments.Count > 0 ? propObsolete.ConstructorArguments[0].Value?.ToString() : null;
-                            sb.AppendLine(msg != null ? $"        [Obsolete(\"{msg}\")]" : "        [Obsolete]");
+                            var escapedMsg = EscapeStringForAttribute(msg);
+                            sb.AppendLine(escapedMsg != null ? $"        [Obsolete(\"{escapedMsg}\")]" : "        [Obsolete]");
                         }
                         sb.AppendLine($"        public {GetTypeName(property.PropertyType)} {property.Name} {{ get; set; }}");
                     }
@@ -248,70 +305,231 @@ namespace ReflectionGenerator
                 {
                     if (method.IsPublic && !method.IsConstructor && !method.IsSpecialName)
                     {
-                        // Add XML doc comment for method
                         sb.AppendLine("        /// <summary>");
                         sb.AppendLine($"        /// {method.Name} method.");
                         sb.AppendLine("        /// </summary>");
                         foreach (var param in method.Parameters)
-                            sb.AppendLine($"        /// <param name=\"{param.Name}\">{param.ParameterType.Name}</param>");
+                            sb.AppendLine($"        /// <param name=\"{param.Name}\">{GetTypeName(param.ParameterType)}</param>"); // Use GetTypeName for param type
                         if (method.ReturnType.FullName != "System.Void")
-                            sb.AppendLine($"        /// <returns>{method.ReturnType.Name}</returns>");
-                        // Add [Obsolete] if present
+                            sb.AppendLine($"        /// <returns>{GetTypeName(method.ReturnType)}</returns>"); // Use GetTypeName for return type
                         var methObsolete = method.CustomAttributes.FirstOrDefault(a => a.AttributeType.FullName == "System.ObsoleteAttribute");
                         if (methObsolete != null)
                         {
                             var msg = methObsolete.ConstructorArguments.Count > 0 ? methObsolete.ConstructorArguments[0].Value?.ToString() : null;
-                            sb.AppendLine(msg != null ? $"        [Obsolete(\"{msg}\")]" : "        [Obsolete]");
+                            var escapedMsg = EscapeStringForAttribute(msg);
+                            sb.AppendLine(escapedMsg != null ? $"        [Obsolete(\"{escapedMsg}\")]" : "        [Obsolete]");
                         }
+                        
+                        string methodGenericParams = "";
+                        if (method.HasGenericParameters)
+                        {
+                            methodGenericParams = "<" + string.Join(", ", method.GenericParameters.Select(p => p.Name)) + ">";
+                            // Append constraints for method generic parameters
+                            var methodConstraints = new StringBuilder();
+                            foreach (var param in method.GenericParameters)
+                            {
+                                var paramConstraints = param.Constraints.Select(c => GetTypeName(c.ConstraintType)).ToList();
+                                if (param.HasReferenceTypeConstraint) paramConstraints.Insert(0, "class");
+                                if (param.HasNotNullableValueTypeConstraint) paramConstraints.Insert(0, "struct");
+                                if (param.HasDefaultConstructorConstraint && !param.HasNotNullableValueTypeConstraint) paramConstraints.Add("new()");
+                                if (paramConstraints.Count > 0)
+                                {
+                                    methodConstraints.Append($" where {param.Name} : {string.Join(", ", paramConstraints)}");
+                                }
+                            }
+                            methodGenericParams += methodConstraints.ToString();
+                        }
+
                         var parameters = string.Join(", ", method.Parameters.Select(p =>
                             $"{GetTypeName(p.ParameterType)} {p.Name}"));
-                        sb.AppendLine($"        public {GetTypeName(method.ReturnType)} {method.Name}({parameters});");
+                        sb.AppendLine($"        public {GetTypeName(method.ReturnType)} {method.Name}{methodGenericParams}({parameters});");
                     }
                 }
                 sb.AppendLine("        #endregion");
 
-                // Close type and namespace
                 sb.AppendLine("    }");
                 if (!string.IsNullOrEmpty(type.Namespace))
                 {
                     sb.AppendLine("}");
                 }
 
-                // Write to file
-                var fileName = !string.IsNullOrEmpty(type.Namespace) ? $"{type.Namespace}.{type.Name}.cs" : $"{type.Name}.cs";
-                var filePath = Path.Combine(outputDir, fileName);
+                // Adjust filename generation to use the simple name for the file
+                var simpleTypeNameForFile = SanitizeFileNameComponent(type.Name.Split('`')[0]);
+                var sanitizedNamespace = !string.IsNullOrEmpty(type.Namespace) ? SanitizeFileNameComponent(type.Namespace) : null;
+                var finalFileName = !string.IsNullOrEmpty(sanitizedNamespace) ? $"{sanitizedNamespace}.{simpleTypeNameForFile}.cs" : $"{simpleTypeNameForFile}.cs";
+                
+                var filePath = Path.Combine(outputDir, finalFileName);
                 var content = sb.ToString();
                 File.WriteAllText(filePath, content);
 
-                // Recursively process nested types (e.g., enums inside classes)
                 foreach (var nestedType in type.NestedTypes)
                 {
+                    // For nested types, the output directory is the same.
+                    // GenerateTypeScaffolding will handle their full names correctly.
                     GenerateTypeScaffolding(nestedType, outputDir);
                 }
             }
         }
 
-        private static string GetTypeName(TypeReference type)
+        internal static string GetTypeName(TypeReference type)
         {
             if (type.IsGenericParameter)
                 return type.Name;
 
+            string fullName = type.FullName.Replace("/", "."); // Handle nested type names like declaringType.NestedType
+
             if (type.IsGenericInstance)
             {
                 var genericType = (GenericInstanceType)type;
-                var baseType = genericType.ElementType.Name.Split('`')[0];
+                var elementTypeFullName = genericType.ElementType.FullName.Replace("/", ".");
+                var baseTypeName = elementTypeFullName.Split('`')[0];
                 var typeArgs = string.Join(", ", genericType.GenericArguments.Select(GetTypeName));
-                return $"{baseType}<{typeArgs}>";
+                
+                // Handle cases like Nullable<T> which should be T?
+                if (baseTypeName == "System.Nullable" && genericType.GenericArguments.Count == 1)
+                {
+                    return $"{GetTypeName(genericType.GenericArguments[0])}?";
+                }
+                
+                return $"{baseTypeName}<{typeArgs}>";
             }
 
             if (type.HasGenericParameters)
             {
-                var baseType = type.Name.Split('`')[0];
+                var baseTypeName = fullName.Split('`')[0];
                 var typeParams = string.Join(", ", type.GenericParameters.Select(p => p.Name));
-                return $"{baseType}<{typeParams}>";
+                // Constraints are handled at the declaration site (class/method), not in GetTypeName for type definitions.
+                // GetTypeName is for resolving type references.
+                return $"{baseTypeName}<{typeParams}>";
+            }
+            
+            // Use C# keyword for primitive types
+            switch (fullName)
+            {
+                case "System.Boolean": return "bool";
+                case "System.Byte": return "byte";
+                case "System.SByte": return "sbyte";
+                case "System.Char": return "char";
+                case "System.Decimal": return "decimal";
+                case "System.Double": return "double";
+                case "System.Single": return "float";
+                case "System.Int32": return "int";
+                case "System.UInt32": return "uint";
+                case "System.Int64": return "long";
+                case "System.UInt64": return "ulong";
+                case "System.Int16": return "short";
+                case "System.UInt16": return "ushort";
+                case "System.String": return "string";
+                case "System.Object": return "object";
+                case "System.Void": return "void";
+                // Consider global:: prefix for types that might conflict with local names, though Cecil usually gives full names.
+                default: return fullName; 
+            }
+        }
+
+        internal static string? EscapeStringForAttribute(string? message)
+        {
+            if (string.IsNullOrEmpty(message))
+            {
+                return message;
             }
 
-            return type.Name;
+            var sb = new StringBuilder();
+            foreach (char c in message)
+            {
+                switch (c)
+                {
+                    case '"': sb.Append("\\\""); break;
+                    case '\\': sb.Append("\\\\"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    // Add other escapes if necessary, e.g. for other control characters
+                    // case '\b': sb.Append("\\b"); break;
+                    // case '\f': sb.Append("\\f"); break;
+                    // case '\v': sb.Append("\\v"); break;
+                    // case '\0': sb.Append("\\0"); break;
+                    default:
+                        // Check for other control characters and unicode escape them if needed
+                        if (char.IsControl(c))
+                        {
+                            sb.AppendFormat("\\u{0:x4}", (int)c);
+                        }
+                        else
+                        {
+                            sb.Append(c);
+                        }
+                        break;
+                }
+            }
+            return sb.ToString();
+        }
+
+        internal static string FormatEnumMemberValue(object value, TypeReference underlyingType)
+        {
+            // field.Constant gives the value directly in its underlying type (e.g., int, long, byte).
+            // We need to ensure it's formatted correctly for C# source code.
+            string underlyingTypeName = underlyingType.FullName;
+
+            if (underlyingTypeName == "System.Int64") // long
+            {
+                return $"{value}L";
+            }
+            else if (underlyingTypeName == "System.UInt64") // ulong
+            {
+                // For ulong, if the value is large enough to be ambiguous with long, it might need UL.
+                // However, ToString() on a ulong usually produces a number that C# interprets correctly.
+                // Explicitly adding UL can be done for absolute clarity or if issues arise.
+                // For very large ulong values, C# might require a cast if not using UL, but direct assignment usually works.
+                // Let's add UL for consistency and to avoid any ambiguity.
+                return $"{value}UL";
+            }
+            else if (underlyingTypeName == "System.UInt32" || // uint
+                     underlyingTypeName == "System.UInt16" || // ushort
+                     underlyingTypeName == "System.Byte")     // byte
+            {
+                 // For uint, ushort, byte, sometimes 'U' suffix is used for uint if number could be int,
+                 // but generally, direct number is fine.
+                 // Example: (uint)10 or 10u.
+                 // For now, direct ToString() is usually sufficient as context of enum implies the type.
+                 // If we want to be extremely explicit:
+                 // if (underlyingTypeName == "System.UInt32") return $"{value}U";
+                 // if (underlyingTypeName == "System.UInt16") return $"(ushort){value}"; // or just value
+                 // if (underlyingTypeName == "System.Byte") return $"(byte){value}"; // or just value
+                 return value.ToString(); // Default ToString() is generally fine for these.
+            }
+            // For System.Int32, System.Int16, System.SByte, System.Char, the default ToString() is correct.
+            return value.ToString();
+        }
+
+        internal static string SanitizeFileNameComponent(string component)
+        {
+            if (string.IsNullOrEmpty(component))
+            {
+                return component;
+            }
+
+            var sb = new StringBuilder();
+            // Define invalid characters. Includes Path.GetInvalidFileNameChars() and Path.GetInvalidPathChars()
+            // Also explicitly list some common ones to be sure.
+            char[] invalidChars = Path.GetInvalidFileNameChars().Concat(Path.GetInvalidPathChars()).Distinct().ToArray();
+            // To be absolutely safe, add common problematic characters explicitly if not already covered
+            // by the system's invalid char sets. For this exercise, we'll assume the system sets are comprehensive enough
+            // for typical scenarios but one might add < > : " / \ | ? * and control chars explicitly.
+            // For this implementation, we rely on system provided lists and then manually check for control characters.
+
+            foreach (char c in component)
+            {
+                if (Array.IndexOf(invalidChars, c) >= 0 || char.IsControl(c))
+                {
+                    sb.Append('_'); // Replace invalid char with underscore
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+            return sb.ToString();
         }
     }
 }
