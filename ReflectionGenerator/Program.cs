@@ -52,13 +52,13 @@ namespace ReflectionGenerator
                     Console.WriteLine("  --dll <path>     Path to the DLL file to process (required)");
                     Console.WriteLine("  --output <path>  Output directory for generated code (default: .\\generated-code)");
                     Console.WriteLine("  --ignored-filenames <path>  Path to file containing stopwords to ignore in filenames (optional)");
-                    return;
+                    return; // Exit early with usage instructions
                 }
 
                 if (!File.Exists(dllPath))
                 {
                     Console.WriteLine($"Error: File {dllPath} does not exist.");
-                    return;
+                    return; // Exit early due to missing file
                 }
 
                 // Load ignored stopwords if file is provided
@@ -67,7 +67,7 @@ namespace ReflectionGenerator
                     if (!File.Exists(ignoredFilenamesPath))
                     {
                         Console.WriteLine($"Error: Ignored filenames file {ignoredFilenamesPath} does not exist.");
-                        return;
+                        return; // Exit early due to missing ignored filenames file
                     }
                     _ignoredStopwords = new HashSet<string>(File.ReadAllLines(ignoredFilenamesPath)
                         .Where(line => !string.IsNullOrWhiteSpace(line))
@@ -89,7 +89,7 @@ namespace ReflectionGenerator
                 {
                     try
                     {
-            if (ShouldProcessType(type))
+                if (ShouldProcessType(type))
             {
                 // Check if original type name starts with underscore
                 if (type.Name.StartsWith("_"))
@@ -180,7 +180,7 @@ namespace ReflectionGenerator
             }
 
             // Add namespace
-            if (!string.IsNullOrEmpty(type.Namespace))
+            if (!string.IsNullOrEmpty(type.Namespace) && type.Namespace != null)
             {
                 sb.AppendLine($"namespace {type.Namespace}");
                 sb.AppendLine("{");
@@ -243,7 +243,8 @@ namespace ReflectionGenerator
                 
                 // For baseType, ensure it's not System.Object and not an enum's implicit base.
                 var baseTypeString = "";
-                if (type.BaseType != null && type.BaseType.FullName != "System.Object" && !type.IsEnum)
+                if (type.BaseType?.FullName != null &&
+                   type.BaseType.FullName != "System.Object" && !type.IsEnum)
                 {
                     baseTypeString = $" : {GetTypeName(type.BaseType)}";
                 }
@@ -257,7 +258,7 @@ namespace ReflectionGenerator
 
                 // Remove potential namespace qualifier from the type name for declaration if it's in the current namespace
                 string localTypeName = typeNameString;
-                if (!string.IsNullOrEmpty(type.Namespace) && typeNameString.StartsWith(type.Namespace + "."))
+                if (!string.IsNullOrEmpty(type.Namespace) && type.Namespace != null && typeNameString.StartsWith(type.Namespace + "."))
                 {
                      localTypeName = typeNameString.Substring(type.Namespace.Length + 1);
                 }
@@ -355,9 +356,7 @@ namespace ReflectionGenerator
                             }
                             if (methodConstraints.Length > 0)
                             {
-                                sb.AppendLine();
-                                sb.AppendLine();
-                                sb.Append($"            {methodConstraints.ToString().Trim()}");
+                                sb.Append($" {methodConstraints.ToString().Trim()}");
                             }
                         }
 
@@ -377,7 +376,7 @@ namespace ReflectionGenerator
                             sb.AppendLine($"        public {GetTypeName(method.ReturnType)} {method.Name}{methodGenericParams}({parameters})");
                             if (methodConstraints.Length > 0)
                             {
-                                sb.AppendLine($"            {methodConstraints.ToString().Trim()}");
+                               sb.AppendLine($"            {methodConstraints.ToString().Trim()}");
                             }
                             sb.AppendLine("        {");
                             sb.AppendLine("            // Method implementation goes here");
@@ -417,13 +416,17 @@ namespace ReflectionGenerator
         public static string GetTypeName(TypeReference type)
         {
             // Handle enum types - return their actual name
-            if (type.Resolve()?.IsEnum == true)
+            var resolvedType = type.Resolve();
+            if (resolvedType != null && resolvedType.IsEnum)
             {
                 return type.Name;
             }
             if (type.IsGenericParameter)
                 return type.Name;
 
+            if (type.FullName == null)
+                return "dynamic"; // Fallback for unexpected null FullName
+            
             string fullName = type.FullName.Replace("/", "."); // Handle nested type names like declaringType.NestedType
 
             // Rest of the original GetTypeName implementation
@@ -471,8 +474,8 @@ namespace ReflectionGenerator
                 case "System.String": return "string";
                 case "System.Object": return "object";
                 case "System.Void": return "void";
-                // Consider global:: prefix for types that might conflict with local names, though Cecil usually gives full names.
-                default: return fullName; 
+                // Consider global:: prefix for types that might conflict with local names
+                default: return fullName;
             }
         }
 
@@ -480,7 +483,7 @@ namespace ReflectionGenerator
         {
             if (string.IsNullOrEmpty(message))
             {
-                return message;
+                return string.Empty;
             }
 
             var sb = new StringBuilder();
@@ -516,9 +519,14 @@ namespace ReflectionGenerator
 
         public static string FormatEnumMemberValue(object value, TypeReference underlyingType)
         {
+            if (value == null)
+            {
+                return "0"; // Handle null values immediately
+            }
+
             // field.Constant gives the value directly in its underlying type (e.g., int, long, byte).
             // We need to ensure it's formatted correctly for C# source code.
-            string underlyingTypeName = underlyingType.FullName;
+            string underlyingTypeName = underlyingType.FullName ?? "System.Int32"; // Default to int if FullName is null
 
             if (underlyingTypeName == "System.Int64") // long
             {
@@ -526,36 +534,23 @@ namespace ReflectionGenerator
             }
             else if (underlyingTypeName == "System.UInt64") // ulong
             {
-                // For ulong, if the value is large enough to be ambiguous with long, it might need UL.
-                // However, ToString() on a ulong usually produces a number that C# interprets correctly.
-                // Explicitly adding UL can be done for absolute clarity or if issues arise.
-                // For very large ulong values, C# might require a cast if not using UL, but direct assignment usually works.
-                // Let's add UL for consistency and to avoid any ambiguity.
                 return $"{value}UL";
             }
             else if (underlyingTypeName == "System.UInt32" || // uint
                      underlyingTypeName == "System.UInt16" || // ushort
                      underlyingTypeName == "System.Byte")     // byte
             {
-                 // For uint, ushort, byte, sometimes 'U' suffix is used for uint if number could be int,
-                 // but generally, direct number is fine.
-                 // Example: (uint)10 or 10u.
-                 // For now, direct ToString() is usually sufficient as context of enum implies the type.
-                 // If we want to be extremely explicit:
-                 // if (underlyingTypeName == "System.UInt32") return $"{value}U";
-                 // if (underlyingTypeName == "System.UInt16") return $"(ushort){value}"; // or just value
-                 // if (underlyingTypeName == "System.Byte") return $"(byte){value}"; // or just value
-                 return value.ToString(); // Default ToString() is generally fine for these.
+                 return Convert.ToString(value) ?? "0"; // Additional safety even though we checked for null already
             }
             // For System.Int32, System.Int16, System.SByte, System.Char, the default ToString() is correct.
-            return value.ToString();
+            return Convert.ToString(value) ?? "0"; // Additional safety even though we checked for null already
         }
 
         public static string SanitizeFileNameComponent(string component)
         {
             if (string.IsNullOrEmpty(component))
             {
-                return component;
+                return string.Empty;
             }
 
             var sb = new StringBuilder();
