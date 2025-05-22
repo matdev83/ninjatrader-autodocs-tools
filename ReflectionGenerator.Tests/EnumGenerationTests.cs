@@ -10,8 +10,8 @@ namespace ReflectionGenerator.Tests
     [TestClass]
     public class EnumGenerationTests
     {
-        private static ModuleDefinition _testModule;
-        private static string _tempOutputDir;
+        private static ModuleDefinition _testModule = null!;
+        private static string _tempOutputDir = null!;
 
         [ClassInitialize]
         public static void ClassInitialize(TestContext context)
@@ -70,7 +70,6 @@ namespace ReflectionGenerator.Tests
         public void GenerateEnum_WithDefaultUnderlyingType_GeneratesCorrectly()
         {
             var enumDef = new TypeDefinition("Test.Enums", "MySimpleEnum", TypeAttributes.Public | TypeAttributes.Sealed, ImportType(typeof(Enum)));
-            enumDef.IsEnum = true;
             // Mono.Cecil requires a field named "value__" for enums, representing the instance field for the enum's value.
             var valueField = new FieldDefinition("value__", FieldAttributes.Public | FieldAttributes.SpecialName | FieldAttributes.RTSpecialName, _testModule.TypeSystem.Int32);
             enumDef.Fields.Add(valueField);
@@ -96,7 +95,6 @@ namespace ReflectionGenerator.Tests
         public void GenerateEnum_WithLongUnderlyingTypeAndFlags_GeneratesCorrectly()
         {
             var enumDef = new TypeDefinition("Test.Flags", "MyLongFlags", TypeAttributes.Public | TypeAttributes.Sealed, ImportType(typeof(Enum)));
-            enumDef.IsEnum = true;
             var valueField = new FieldDefinition("value__", FieldAttributes.Public | FieldAttributes.SpecialName | FieldAttributes.RTSpecialName, _testModule.TypeSystem.Int64); // Long
             enumDef.Fields.Add(valueField);
 
@@ -132,7 +130,6 @@ namespace ReflectionGenerator.Tests
         public void GenerateEnum_WithByteUnderlyingType_GeneratesCorrectly()
         {
             var enumDef = new TypeDefinition("Test.Bytes", "MyByteEnum", TypeAttributes.Public | TypeAttributes.Sealed, ImportType(typeof(Enum)));
-            enumDef.IsEnum = true;
             var valueField = new FieldDefinition("value__", FieldAttributes.Public | FieldAttributes.SpecialName | FieldAttributes.RTSpecialName, _testModule.TypeSystem.Byte); // Byte
             enumDef.Fields.Add(valueField);
 

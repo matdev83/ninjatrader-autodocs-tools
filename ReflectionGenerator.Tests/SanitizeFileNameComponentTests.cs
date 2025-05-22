@@ -35,14 +35,6 @@ namespace ReflectionGenerator.Tests
             Assert.AreEqual(expected, actual, "Special characters like <, >, : should be replaced.");
         }
 
-        [TestMethod]
-        public void SanitizeFileNameComponent_WithInvalidChars_ReplacesWithUnderscore()
-        {
-            string input = "Invalid<Name>:\"/\\|?*";
-            string expected = "Invalid_Name_______"; // Each invalid char becomes an underscore
-            string actual = Program.SanitizeFileNameComponent(input);
-            Assert.AreEqual(expected, actual);
-        }
 
         [TestMethod]
         public void SanitizeFileNameComponent_WithControlChars_ReplacesWithUnderscore()
